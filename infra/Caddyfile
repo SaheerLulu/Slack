@@ -1,0 +1,21 @@
+# Caddy reverse proxy with automatic HTTPS (Let's Encrypt).
+#
+# Two public hostnames, both pointing (A/AAAA records) at this host:
+#   - APP_DOMAIN       -> the chat app (HTTP + WebSocket)
+#   - LIVEKIT_DOMAIN   -> LiveKit signaling (wss). Media still flows over the
+#                         UDP/TCP ports published by the livekit container.
+#
+# Caddy provisions and renews TLS certs automatically and upgrades
+# WebSocket connections transparently. Set ACME_EMAIL for renewal notices.
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$APP_DOMAIN} {
+	reverse_proxy app:8000
+}
+
+{$LIVEKIT_DOMAIN} {
+	reverse_proxy livekit:7880
+}

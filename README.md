@@ -17,6 +17,8 @@ and typing indicators — with zero mandatory external services.
 - 📎 **File uploads** — attach images and files to messages
 - 🔔 **Mentions & notifications** — `@mention` people, get notified
 - 🔍 **Search** — full message search across your channels
+- 📹 **Group calls & screen share** — multi-party video/audio via a self-hosted
+  LiveKit SFU, with screen sharing
 - ⚡ **Real-time** — messages, presence, and typing over WebSockets
 - 🟢 **Presence** — see who's online
 - 🐳 **Self-host** — one `docker compose up`, data in a mounted volume
@@ -29,6 +31,7 @@ and typing indicators — with zero mandatory external services.
 | Real-time  | WebSockets via Channels (in-memory layer; Redis optional)|
 | Database   | SQLite by default; Postgres via `DATABASE_URL`          |
 | Auth       | JWT (`djangorestframework-simplejwt`)                   |
+| Calls      | LiveKit SFU + `livekit-client`; coturn for TURN         |
 | Frontend   | React + Vite + Zustand                                  |
 | Server     | daphne (ASGI) + WhiteNoise (static)                     |
 | Deploy     | Docker / docker-compose                                 |
@@ -109,6 +112,60 @@ docker compose --profile postgres --profile redis up --build
 > Note: the default in-memory Channels layer only works within a single
 > process. To run multiple workers/replicas you **must** set `REDIS_URL`.
 
+## Calls (group video + screen share)
+
+Calling is powered by a self-hosted [LiveKit](https://livekit.io) SFU, included
+in `docker-compose.yml`. With `docker compose up` you get a working LiveKit
+server on port `7880`; the **📹 Call** button appears in every channel/DM
+header. The first person starts a call, everyone else in that channel sees a
+ring + a "Join call" button. Controls: mute, camera, **screen share**, leave.
+
+How it fits together:
+
+- The Django backend mints short-lived **LiveKit access tokens** (signed JWTs)
+  at `POST /api/channels/:id/call/token`, gated by channel membership.
+- The browser connects directly to the LiveKit SFU using that token; media
+  (audio/video/screen) is relayed by the SFU — so it scales to many
+  participants, unlike peer-to-peer mesh.
+- A `call:state` event over the app's own WebSocket tells everyone who's
+  currently in a call.
+
+### Important deployment notes
+
+- **Match the secrets.** `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` (backend env)
+  must match the `keys:` in `infra/livekit.yaml`. Change them for production.
+- **`LIVEKIT_WS_URL` must be reachable by the browser.** Locally
+  `ws://localhost:7880` is fine. For a server, set it to your public address —
+  and use **`wss://`** if the app is served over HTTPS (browsers block mixed
+  content).
+- **HTTPS is required for camera/mic** on any non-`localhost` origin — that's a
+  browser rule (`getUserMedia`/`getDisplayMedia` need a secure context). Put the
+  app and LiveKit behind TLS in production.
+- **Open the media ports:** LiveKit uses UDP `50000-50100` (published in the
+  compose file) plus `7881/tcp` as a fallback. `use_external_ip: true` in
+  `infra/livekit.yaml` makes it advertise reachable candidates.
+
+### TURN (coturn) for strict networks
+
+When clients are behind strict NATs/firewalls, relay via a TURN server. A
+`coturn` service is provided behind the `turn` profile:
+
+```bash
+docker compose --profile turn up
+```
+
+Then advertise it to clients by setting (in `.env`):
+
+```bash
+EXTRA_ICE_SERVERS=[{"urls":"turn:YOUR_HOST:3478","username":"slack","credential":"slackturnpassword"}]
+```
+
+Edit `infra/turnserver.conf` to set your public IP and a real credential.
+(LiveKit also ships an embedded TURN — see the commented block in
+`infra/livekit.yaml` — which is an alternative to running coturn.)
+
+To disable calling entirely, set `CALLS_ENABLED=false`.
+
 ## Project layout
 
 ```
@@ -145,13 +202,15 @@ REST (all under `/api`, JWT via `Authorization: Bearer <token>`):
 - `POST /api/channels/:id/join` · `GET /api/channels/:id/members` · `POST /api/channels/:id/read`
 - `GET/POST /api/channels/:id/messages`
 - `PATCH/DELETE /api/messages/:id` · `GET /api/messages/:id/thread` · `PUT/DELETE /api/messages/:id/reactions`
+- `POST /api/channels/:id/call/token` — mint a LiveKit token (`{ ring: true }` to notify members)
 - `POST /api/files` · `GET /api/files/:id`
 - `GET /api/notifications` · `POST /api/notifications/read`
 
 Real-time WebSocket at `/ws/?token=<jwt>`:
 
-- inbound: `{ type: "typing", channelId }`, `{ type: "subscribe", channelId }`, `{ type: "ping" }`
-- outbound: `message`, `message:edit`, `message:delete`, `reaction`, `typing`, `presence`, `presence:init`, `notification`
+- inbound: `typing`, `subscribe`, `call:join`, `call:leave`, `ping`
+- outbound: `message`, `message:edit`, `message:delete`, `reaction`, `typing`,
+  `presence`, `presence:init`, `notification`, `call:ring`, `call:state`
 
 ## Tests
 

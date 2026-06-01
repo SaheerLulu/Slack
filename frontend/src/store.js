@@ -22,6 +22,11 @@ export const useStore = create((set, get) => ({
   notifications: [],
   unreadNotifications: 0,
 
+  // --- calls (LiveKit) ---
+  callStateByChannel: {}, // { [channelId]: { active, participants } }
+  activeCall: null, // { channelId, url, token, room } — the call we're in
+  incomingCall: null, // { channelId, by, channelName }
+
   // --- thread panel ---
   thread: null, // { root, replies }
 
@@ -77,6 +82,9 @@ export const useStore = create((set, get) => ({
       unreadNotifications: 0,
       thread: null,
       rightPanel: null,
+      callStateByChannel: {},
+      activeCall: null,
+      incomingCall: null,
     });
   },
 
@@ -226,6 +234,31 @@ export const useStore = create((set, get) => ({
     });
   },
 
+  // ===================== calls =====================
+  async startCall(channelId) {
+    const data = await api.post(`/channels/${channelId}/call/token`, {
+      ring: true,
+    });
+    set({ activeCall: { channelId, ...data }, incomingCall: null });
+    window.__ws?.callJoin(channelId);
+  },
+
+  async joinCall(channelId) {
+    const data = await api.post(`/channels/${channelId}/call/token`, {});
+    set({ activeCall: { channelId, ...data }, incomingCall: null });
+    window.__ws?.callJoin(channelId);
+  },
+
+  leaveCall() {
+    const call = get().activeCall;
+    if (call) window.__ws?.callLeave(call.channelId);
+    set({ activeCall: null });
+  },
+
+  dismissIncoming() {
+    set({ incomingCall: null });
+  },
+
   // ===================== members =====================
   async loadMembers() {
     const members = await api.get(
@@ -301,6 +334,40 @@ export const useStore = create((set, get) => ({
           notifications: [event.notification, ...state.notifications],
           unreadNotifications: state.unreadNotifications + 1,
         });
+        break;
+      }
+      case 'call:ring': {
+        const inThisCall = state.activeCall?.channelId === event.channelId;
+        if (event.by.id !== state.user?.id && !inThisCall) {
+          set({
+            incomingCall: {
+              channelId: event.channelId,
+              by: event.by,
+              channelName: event.channelName,
+            },
+          });
+        }
+        break;
+      }
+      case 'call:state': {
+        set({
+          callStateByChannel: {
+            ...state.callStateByChannel,
+            [event.channelId]: {
+              active: event.active,
+              participants: event.participants,
+            },
+          },
+        });
+        // The call we're in (or were rung for) ended.
+        if (!event.active) {
+          if (state.activeCall?.channelId === event.channelId) {
+            set({ activeCall: null });
+          }
+          if (state.incomingCall?.channelId === event.channelId) {
+            set({ incomingCall: null });
+          }
+        }
         break;
       }
       default:

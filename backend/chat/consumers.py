@@ -17,6 +17,11 @@ from . import events
 # transitions (online/offline) only fire on the first/last connection.
 _connection_counts = {}
 
+# Active calls: channel_id -> { user_id: display_name }. LiveKit handles the
+# actual media; this just tracks who's in a channel's call so we can show a
+# "call in progress" banner and participant list to everyone.
+_call_participants = {}
+
 
 class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -43,14 +48,26 @@ class ChatConsumer(AsyncWebsocketConsumer):
         for group in self.groups_joined:
             await self.channel_layer.group_add(group, self.channel_name)
 
+        # Calls this connection is currently in (for disconnect cleanup).
+        self.calls_joined = set()
+
         first = _connection_counts.get(self.user.id, 0) == 0
         _connection_counts[self.user.id] = _connection_counts.get(self.user.id, 0) + 1
         if first:
             await self._broadcast_presence(True)
 
+        # Tell the new client about any calls already in progress.
+        for cid in self.channel_ids:
+            if _call_participants.get(cid):
+                await self._send_call_state(cid)
+
     async def disconnect(self, code):
         if not getattr(self, "user", None) or not self.user.is_authenticated:
             return
+        # Drop out of any calls this connection joined.
+        for cid in list(getattr(self, "calls_joined", set())):
+            await self._call_leave(cid)
+
         for group in getattr(self, "groups_joined", []):
             await self.channel_layer.group_discard(group, self.channel_name)
 
@@ -92,6 +109,18 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     group = events.channel_group(channel_id)
                     self.groups_joined.append(group)
                     await self.channel_layer.group_add(group, self.channel_name)
+        elif msg_type == "call:join":
+            channel_id = data.get("channelId")
+            if channel_id in self.channel_ids:
+                _call_participants.setdefault(channel_id, {})[self.user.id] = (
+                    self.user.display_name
+                )
+                self.calls_joined.add(channel_id)
+                await self._send_call_state(channel_id, to_group=True)
+        elif msg_type == "call:leave":
+            channel_id = data.get("channelId")
+            if channel_id in self.calls_joined:
+                await self._call_leave(channel_id)
         elif msg_type == "ping":
             await self.send(json.dumps({"type": "pong"}))
 
@@ -109,6 +138,38 @@ class ChatConsumer(AsyncWebsocketConsumer):
         }
         for wid in getattr(self, "workspace_ids", []):
             await self.channel_layer.group_send(events.workspace_group(wid), event)
+
+    async def _call_leave(self, channel_id):
+        self.calls_joined.discard(channel_id)
+        participants = _call_participants.get(channel_id)
+        if participants and self.user.id in participants:
+            # Only remove if this user has no other connection still in the call.
+            # (Best-effort: per-connection tracking; multiple tabs share id.)
+            del participants[self.user.id]
+            if not participants:
+                _call_participants.pop(channel_id, None)
+            await self._send_call_state(channel_id, to_group=True)
+
+    async def _send_call_state(self, channel_id, to_group=False):
+        participants = _call_participants.get(channel_id, {})
+        event = {
+            "type": "broadcast",
+            "event": {
+                "type": "call:state",
+                "channelId": channel_id,
+                "active": bool(participants),
+                "participants": [
+                    {"id": uid, "displayName": name}
+                    for uid, name in participants.items()
+                ],
+            },
+        }
+        if to_group:
+            await self.channel_layer.group_send(
+                events.channel_group(channel_id), event
+            )
+        else:
+            await self.send(json.dumps(event["event"]))
 
     @database_sync_to_async
     def _memberships(self):

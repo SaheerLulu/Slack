@@ -578,6 +578,53 @@ def list_notifications(request):
     })
 
 
+# --------------------------------------------------------------------------
+# Calls (LiveKit SFU)
+# --------------------------------------------------------------------------
+@api_view(["POST"])
+def call_token(request, channel_id):
+    """Issue a LiveKit access token for the channel's call room.
+
+    Pass ``{"ring": true}`` to also notify other channel members that a call
+    is starting (shows an incoming-call prompt).
+    """
+    if not settings.CALLS_ENABLED:
+        return Response(
+            {"detail": "Calls are disabled on this server."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    channel = perms.require_channel_member(request.user, channel_id)
+
+    from .livekit_token import create_access_token, room_name_for_channel
+
+    room = room_name_for_channel(channel_id)
+    token = create_access_token(
+        identity=request.user.id,
+        name=request.user.display_name,
+        room=room,
+    )
+
+    if request.data.get("ring"):
+        events.to_channel(
+            channel_id,
+            "call:ring",
+            {
+                "channelId": channel_id,
+                "by": UserSerializer(request.user).data,
+                "channelName": channel.name or "Direct message",
+            },
+        )
+
+    return Response(
+        {
+            "url": settings.LIVEKIT_WS_URL,
+            "token": token,
+            "room": room,
+            "iceServers": settings.EXTRA_ICE_SERVERS,
+        }
+    )
+
+
 @api_view(["POST"])
 def read_notifications(request):
     ids = request.data.get("ids")

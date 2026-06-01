@@ -1,3 +1,5 @@
+import jwt
+from django.conf import settings
 from rest_framework.test import APITestCase
 
 from .models import Channel, Message, Notification, Workspace
@@ -152,6 +154,41 @@ class ChatFlowTests(APITestCase):
         resp = self.client.get(f"/api/channels/{dm_id}/messages")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(len(resp.data), 1)
+
+    def test_call_token_grants_room_access(self):
+        alice = self._register("alice")
+        self._auth(alice["access"])
+        general = Channel.objects.get(name="general")
+
+        resp = self.client.post(f"/api/channels/{general.id}/call/token")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.data["room"], f"channel-{general.id}")
+        self.assertTrue(resp.data["url"])
+
+        # The token is a LiveKit JWT signed with the API secret; verify grants.
+        claims = jwt.decode(
+            resp.data["token"], settings.LIVEKIT_API_SECRET, algorithms=["HS256"]
+        )
+        self.assertEqual(claims["video"]["room"], f"channel-{general.id}")
+        self.assertTrue(claims["video"]["roomJoin"])
+        self.assertTrue(claims["video"]["canPublish"])
+
+    def test_call_token_requires_membership(self):
+        alice = self._register("alice")
+        bob = self._register("bob")
+        wid = self.workspace.id
+
+        self._auth(alice["access"])
+        resp = self.client.post(
+            f"/api/workspaces/{wid}/channels",
+            {"name": "secret", "isPrivate": True},
+            format="json",
+        )
+        channel_id = resp.data["id"]
+
+        self._auth(bob["access"])
+        resp = self.client.post(f"/api/channels/{channel_id}/call/token")
+        self.assertEqual(resp.status_code, 403)
 
     def test_non_member_cannot_read_private_channel(self):
         alice = self._register("alice")

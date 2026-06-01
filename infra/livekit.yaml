@@ -1,0 +1,32 @@
+# LiveKit SFU configuration for self-hosting group calls.
+# The API key/secret here MUST match the backend's LIVEKIT_API_KEY /
+# LIVEKIT_API_SECRET environment variables (the backend signs join tokens
+# with the same secret).
+port: 7880
+bind_addresses:
+  - "0.0.0.0"
+
+rtc:
+  tcp_port: 7881
+  # UDP media port range — must be published by the container/host.
+  port_range_start: 50000
+  port_range_end: 50100
+  # Discover the host's public IP so remote browsers get reachable
+  # ICE candidates. For a fixed deployment you can hardcode:
+  #   node_ip: 203.0.113.10
+  use_external_ip: true
+
+# Dev credentials — CHANGE THESE in production (and the matching backend env).
+keys:
+  devkey: devsecret-change-me-at-least-32-bytes-long
+
+logging:
+  level: info
+
+# LiveKit also has an embedded TURN server you can enable instead of (or in
+# addition to) coturn. For TLS TURN on 443 you must provide certs:
+# turn:
+#   enabled: true
+#   domain: livekit.example.com
+#   tls_port: 5349
+#   udp_port: 3478

@@ -61,6 +61,14 @@ class WsClient {
     this.send({ type: 'subscribe', channelId });
   }
 
+  callJoin(channelId) {
+    this.send({ type: 'call:join', channelId });
+  }
+
+  callLeave(channelId) {
+    this.send({ type: 'call:leave', channelId });
+  }
+
   close() {
     this.shouldRun = false;
     clearInterval(this.pingTimer);

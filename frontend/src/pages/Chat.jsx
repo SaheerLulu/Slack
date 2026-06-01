@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { useStore } from '../store';
 import { Avatar, initials, colorFor, Modal } from '../components/ui';
 import Sidebar from '../components/Sidebar';
@@ -8,6 +8,10 @@ import ThreadPanel from '../components/ThreadPanel';
 import MemberList from '../components/MemberList';
 import SearchPanel from '../components/SearchPanel';
 import NotificationsBell from '../components/NotificationsBell';
+import { Avatar as AvatarCmp } from '../components/ui';
+
+// Lazy-loaded so the LiveKit SDK is only fetched when a call starts.
+const CallView = lazy(() => import('../components/CallView'));
 
 export default function Chat() {
   const {
@@ -25,6 +29,12 @@ export default function Chat() {
     setRightPanel,
     typingByChannel,
     onlineUserIds,
+    startCall,
+    joinCall,
+    activeCall,
+    incomingCall,
+    dismissIncoming,
+    callStateByChannel,
   } = useStore();
 
   const [showCreateWs, setShowCreateWs] = useState(false);
@@ -99,6 +109,7 @@ export default function Chat() {
               </span>
               {channel.topic && <span className="topic">{channel.topic}</span>}
               <span className="spacer" />
+              {channel.isMember && <CallButton channel={channel} />}
               {!channel.isDm && (
                 <button
                   className="icon-btn"
@@ -149,6 +160,38 @@ export default function Chat() {
         )}
       </div>
 
+      {/* Incoming call banner */}
+      {incomingCall && (!activeCall || activeCall.channelId !== incomingCall.channelId) && (
+        <div className="incoming-call">
+          <AvatarCmp user={incomingCall.by} size={36} />
+          <div className="ic-text">
+            <strong>{incomingCall.by.display_name}</strong> started a call
+            <div className="ic-sub">
+              in{' '}
+              {channels.find((c) => c.id === incomingCall.channelId)?.isDm
+                ? incomingCall.channelName
+                : `#${incomingCall.channelName}`}
+            </div>
+          </div>
+          <button
+            className="ic-join"
+            onClick={() => joinCall(incomingCall.channelId)}
+          >
+            Join
+          </button>
+          <button className="ic-decline" onClick={dismissIncoming}>
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Active call window */}
+      {activeCall && (
+        <Suspense fallback={null}>
+          <CallView />
+        </Suspense>
+      )}
+
       {/* Right panel */}
       {rightPanel === 'thread' && <ThreadPanel />}
       {rightPanel === 'members' && <MemberList />}
@@ -161,6 +204,36 @@ export default function Chat() {
         />
       )}
     </div>
+  );
+}
+
+function CallButton({ channel }) {
+  const { callStateByChannel, activeCall, startCall, joinCall } = useStore();
+  const callState = callStateByChannel[channel.id];
+  const inThisCall = activeCall?.channelId === channel.id;
+
+  if (inThisCall) {
+    return <span className="in-call-pill">● In call</span>;
+  }
+  if (callState?.active) {
+    return (
+      <button
+        className="icon-btn call-join"
+        onClick={() => joinCall(channel.id)}
+        title="Join the call in progress"
+      >
+        📹 Join call ({callState.participants.length})
+      </button>
+    );
+  }
+  return (
+    <button
+      className="icon-btn"
+      onClick={() => startCall(channel.id)}
+      title="Start a call"
+    >
+      📹 Call
+    </button>
   );
 }
 

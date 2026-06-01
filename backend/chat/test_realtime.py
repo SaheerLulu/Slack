@@ -31,6 +31,17 @@ async def connect_as(user):
     return communicator
 
 
+async def await_event(comm, event_type, predicate=None, tries=20):
+    """Read frames (ignoring others) until one of ``event_type`` matches."""
+    for _ in range(tries):
+        frame = await comm.receive_json_from(timeout=2)
+        if frame.get("type") == event_type and (
+            predicate is None or predicate(frame)
+        ):
+            return frame
+    raise AssertionError(f"did not receive a matching {event_type} event")
+
+
 class RealtimeTests(TransactionTestCase):
     def setUp(self):
         # Use a slug that won't collide with the migration-seeded "acme".
@@ -79,6 +90,32 @@ class RealtimeTests(TransactionTestCase):
                 break
         self.assertTrue(saw_message, "did not receive broadcast message")
         self.assertTrue(saw_alice_presence, "did not receive Alice's presence event")
+
+        await alice_comm.disconnect()
+        await bob_comm.disconnect()
+
+    async def test_call_join_broadcasts_state_and_cleans_up(self):
+        bob_comm = await connect_as(self.bob)
+        alice_comm = await connect_as(self.alice)
+
+        # Alice joins the channel's call -> Bob gets call:state active=true.
+        await alice_comm.send_json_to(
+            {"type": "call:join", "channelId": self.channel.id}
+        )
+        state = await await_event(
+            bob_comm, "call:state", predicate=lambda f: f["active"]
+        )
+        self.assertEqual(state["channelId"], self.channel.id)
+        self.assertIn(self.alice.id, [p["id"] for p in state["participants"]])
+
+        # Alice leaves the call -> Bob gets call:state active=false.
+        await alice_comm.send_json_to(
+            {"type": "call:leave", "channelId": self.channel.id}
+        )
+        ended = await await_event(
+            bob_comm, "call:state", predicate=lambda f: not f["active"]
+        )
+        self.assertEqual(ended["participants"], [])
 
         await alice_comm.disconnect()
         await bob_comm.disconnect()

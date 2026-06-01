@@ -158,3 +158,22 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
+
+# --- LiveKit (SFU for group video / screen share) ---
+# LIVEKIT_WS_URL is the URL browsers connect to (returned to the client with a
+# freshly minted access token). The API key/secret sign those tokens.
+LIVEKIT_WS_URL = os.environ.get("LIVEKIT_WS_URL", "ws://localhost:7880")
+LIVEKIT_API_KEY = os.environ.get("LIVEKIT_API_KEY", "devkey")
+LIVEKIT_API_SECRET = os.environ.get(
+    "LIVEKIT_API_SECRET", "devsecret-change-me-at-least-32-bytes-long"
+)
+# Whether calling is enabled (requires a reachable LiveKit server).
+CALLS_ENABLED = env_bool("CALLS_ENABLED", True)
+# Optional extra ICE/TURN servers advertised to clients as JSON, e.g.
+#   [{"urls":"turn:turn.example.com:3478","username":"u","credential":"p"}]
+import json as _json  # noqa: E402
+
+try:
+    EXTRA_ICE_SERVERS = _json.loads(os.environ.get("EXTRA_ICE_SERVERS", "[]"))
+except _json.JSONDecodeError:
+    EXTRA_ICE_SERVERS = []

@@ -24,6 +24,28 @@ services:
       - ./data:/data
     restart: unless-stopped
 
+  # --- Optional Caddy reverse proxy with automatic HTTPS ---
+  # Enable with: docker compose --profile tls up
+  # Requires APP_DOMAIN / LIVEKIT_DOMAIN DNS records pointing at this host.
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["tls"]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:-localhost}
+      LIVEKIT_DOMAIN: ${LIVEKIT_DOMAIN:-livekit.localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+      - livekit
+    restart: unless-stopped
+
   # --- LiveKit SFU: powers group video calls + screen sharing ---
   livekit:
     image: livekit/livekit-server:latest
@@ -67,3 +89,5 @@ services:
 
 volumes:
   pgdata:
+  caddy_data:
+  caddy_config:

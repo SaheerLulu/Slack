@@ -34,6 +34,11 @@ CSRF_TRUSTED_ORIGINS = [
     o for o in os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if o
 ]
 
+# When running behind a TLS-terminating reverse proxy (e.g. Caddy), trust its
+# forwarded headers so Django knows the original request was HTTPS.
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 INSTALLED_APPS = [
     "daphne",  # must precede staticfiles to provide the ASGI runserver
     "django.contrib.admin",

@@ -166,6 +166,45 @@ Edit `infra/turnserver.conf` to set your public IP and a real credential.
 
 To disable calling entirely, set `CALLS_ENABLED=false`.
 
+## Production HTTPS (Caddy)
+
+Calls need a secure context (HTTPS) for camera/mic, and you'll want TLS for the
+whole app anyway. A [Caddy](https://caddyserver.com) reverse proxy is included
+that provisions and renews Let's Encrypt certificates automatically.
+
+1. Point two DNS records at your server (Caddy serves both over one cert each):
+   - `chat.example.com` → the app
+   - `livekit.example.com` → LiveKit signaling
+2. Create a `.env` (see `.env.example`):
+
+   ```bash
+   APP_DOMAIN=chat.example.com
+   LIVEKIT_DOMAIN=livekit.example.com
+   ACME_EMAIL=you@example.com
+
+   DJANGO_SECRET_KEY=...                       # openssl rand -hex 32
+   DJANGO_ALLOWED_HOSTS=chat.example.com
+   DJANGO_CSRF_TRUSTED_ORIGINS=https://chat.example.com
+
+   LIVEKIT_WS_URL=wss://livekit.example.com    # browser uses secure WS
+   LIVEKIT_API_KEY=...                         # match infra/livekit.yaml
+   LIVEKIT_API_SECRET=...                       # match infra/livekit.yaml
+   ```
+3. Start everything (app + LiveKit + Caddy):
+
+   ```bash
+   docker compose --profile tls up --build -d
+   ```
+
+Now `https://chat.example.com` serves the app, and calls connect over
+`wss://livekit.example.com`. Make sure ports **80** and **443** (Caddy) plus
+LiveKit's media ports — **UDP 50000-50100** and **TCP 7881** — are open on the
+host firewall. Caddy only proxies the signaling WebSocket; media flows directly
+to LiveKit on those ports, with `use_external_ip` advertising your public IP.
+
+> Behind the proxy, Django reads `X-Forwarded-Proto` (configured via
+> `SECURE_PROXY_SSL_HEADER`) so it correctly treats requests as HTTPS.
+
 ## Project layout
 
 ```

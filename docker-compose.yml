@@ -1,0 +1,38 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure-secret-change-me}
+      DJANGO_DEBUG: "false"
+      DATA_DIR: /data
+      PORT: "8000"
+      # Uncomment to use Postgres (and enable the `postgres` profile below):
+      # DATABASE_URL: postgres://slack:slack@postgres:5432/slack
+      # Uncomment to use Redis for the channel layer (multi-process scaling):
+      # REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+
+  # --- Optional Postgres (enable with: docker compose --profile postgres up) ---
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: slack
+      POSTGRES_PASSWORD: slack
+      POSTGRES_DB: slack
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # --- Optional Redis channel layer (enable with: --profile redis) ---
+  redis:
+    image: redis:7-alpine
+    profiles: ["redis"]
+    restart: unless-stopped
+
+volumes:
+  pgdata:

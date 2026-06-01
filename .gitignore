@@ -1,0 +1,34 @@
+# --- Node / frontend ---
+node_modules/
+dist/
+build/
+.vite/
+
+# --- Python / backend ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Django collected static + built SPA copied in for serving
+backend/staticfiles/
+backend/frontend_dist/
+
+# --- Runtime data (SQLite DB + uploaded media) ---
+data/
+backend/data/
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.db
+
+# --- Secrets / env ---
+.env
+.env.local
+
+# --- Misc ---
+*.log
+.DS_Store
+coverage/
+.pytest_cache/

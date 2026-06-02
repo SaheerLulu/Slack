@@ -2,6 +2,13 @@ import { useRef, useState } from 'react';
 import { useStore } from '../store';
 import { api } from '../api/client';
 import { ws } from '../ws';
+import EmojiPicker from './EmojiPicker';
+
+const SPECIAL_MENTIONS = [
+  { id: -1, username: 'here', display_name: 'Notify online members' },
+  { id: -2, username: 'channel', display_name: 'Notify the whole channel' },
+  { id: -3, username: 'everyone', display_name: 'Notify everyone' },
+];
 
 export default function Composer({ channelId, placeholder, onSend }) {
   const { members } = useStore();
@@ -9,12 +16,13 @@ export default function Composer({ channelId, placeholder, onSend }) {
   const [files, setFiles] = useState([]); // {id, filename}
   const [uploading, setUploading] = useState(false);
   const [mention, setMention] = useState(null); // { query, index }
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const taRef = useRef(null);
   const fileRef = useRef(null);
   const lastTyping = useRef(0);
 
   const mentionMatches = mention
-    ? members
+    ? [...SPECIAL_MENTIONS, ...members]
         .filter((m) =>
           m.username.toLowerCase().startsWith(mention.query.toLowerCase()) ||
           m.display_name.toLowerCase().includes(mention.query.toLowerCase())
@@ -158,6 +166,25 @@ export default function Composer({ channelId, placeholder, onSend }) {
           >
             📎
           </button>
+          <div style={{ position: 'relative' }}>
+            <button
+              className="attach"
+              title="Emoji"
+              onClick={() => setEmojiOpen((v) => !v)}
+            >
+              😊
+            </button>
+            {emojiOpen && (
+              <EmojiPicker
+                onSelect={(e) => {
+                  setText((t) => t + e);
+                  setEmojiOpen(false);
+                  setTimeout(() => taRef.current?.focus(), 0);
+                }}
+                onClose={() => setEmojiOpen(false)}
+              />
+            )}
+          </div>
           <input
             ref={fileRef}
             type="file"

@@ -7,6 +7,7 @@ from .models import (
     Message,
     Notification,
     Reaction,
+    SavedItem,
     User,
     Workspace,
     WorkspaceMember,
@@ -20,4 +21,5 @@ admin.site.register(ChannelMember)
 admin.site.register(Message)
 admin.site.register(Attachment)
 admin.site.register(Reaction)
+admin.site.register(SavedItem)
 admin.site.register(Notification)

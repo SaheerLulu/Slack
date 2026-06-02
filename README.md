@@ -9,13 +9,15 @@ and typing indicators — with zero mandatory external services.
 
 - 🔐 **Auth** — register / login with hashed passwords + JWT sessions
 - 🏢 **Workspaces** — create and switch between multiple workspaces
-- 💬 **Channels** — public & private channels, join/leave, unread badges
-- 📨 **Direct messages** — 1:1 conversations
+- 💬 **Channels** — public & private channels, join/leave, mute, unread badges
+- 📨 **Direct messages** — 1:1 **and group** DMs
 - 🧵 **Threads** — reply in-thread to any message
-- 😀 **Reactions** — emoji reactions on messages
+- 😀 **Reactions** — emoji reactions with a full searchable picker
+- ✍️ **Rich text** — markdown: bold, italic, strike, `code`, code blocks, links
+- 📌 **Pins & 🔖 saved items** — pin messages to a channel, bookmark for later
 - ✏️ **Edit & delete** — edit or soft-delete your own messages
 - 📎 **File uploads** — attach images and files to messages
-- 🔔 **Mentions & notifications** — `@mention` people, get notified
+- 🔔 **Mentions & notifications** — `@user` + `@here`/`@channel`/`@everyone`
 - 🔍 **Search** — full message search across your channels
 - 📹 **Group calls & screen share** — multi-party video/audio via a self-hosted
   LiveKit SFU, with screen sharing

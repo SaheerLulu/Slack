@@ -58,8 +58,8 @@ class Channel(models.Model):
     topic = models.CharField(max_length=250, blank=True)
     is_private = models.BooleanField(default=False)
     is_dm = models.BooleanField(default=False)
-    # Stable sorted "minId:maxId" pair identifying a 1:1 DM channel.
-    dm_key = models.CharField(max_length=40, unique=True, null=True, blank=True)
+    # Stable sorted "wsId:id:id[:id...]" key identifying a DM / group DM.
+    dm_key = models.CharField(max_length=255, unique=True, null=True, blank=True)
     created_by = models.ForeignKey(
         User, null=True, on_delete=models.SET_NULL, related_name="created_channels"
     )
@@ -93,6 +93,8 @@ class ChannelMember(models.Model):
     last_read_message = models.ForeignKey(
         "Message", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
+    # Muted channels don't surface unread badges or notifications.
+    muted = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ("channel", "user")
@@ -113,6 +115,11 @@ class Message(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     edited_at = models.DateTimeField(null=True, blank=True)
     is_deleted = models.BooleanField(default=False)
+    # Pinned-to-channel metadata (pinned_at is set when pinned).
+    pinned_at = models.DateTimeField(null=True, blank=True)
+    pinned_by = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
 
     class Meta:
         indexes = [models.Index(fields=["channel", "id"])]
@@ -146,6 +153,22 @@ class Reaction(models.Model):
 
     class Meta:
         unique_together = ("message", "user", "emoji")
+
+
+class SavedItem(models.Model):
+    """A user's bookmarked / saved message."""
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="saved_items"
+    )
+    message = models.ForeignKey(
+        Message, on_delete=models.CASCADE, related_name="saved_by"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "message")
+        ordering = ["-id"]
 
 
 class Notification(models.Model):

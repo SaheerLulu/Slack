@@ -17,12 +17,16 @@ urlpatterns = [
     path("workspaces/<int:workspace_id>/channels",
          views.ChannelListCreate.as_view()),
     path("workspaces/<int:workspace_id>/dm/<int:user_id>", views.open_dm),
+    path("workspaces/<int:workspace_id>/group-dm", views.open_group_dm),
     path("workspaces/<int:workspace_id>/search", views.search),
 
     # Channels
     path("channels/<int:channel_id>/join", views.join_channel),
+    path("channels/<int:channel_id>/leave", views.leave_channel),
+    path("channels/<int:channel_id>/mute", views.mute_channel),
     path("channels/<int:channel_id>/members", views.channel_members),
     path("channels/<int:channel_id>/read", views.mark_read),
+    path("channels/<int:channel_id>/pins", views.channel_pins),
     path("channels/<int:channel_id>/messages", views.channel_messages),
     path("channels/<int:channel_id>/call/token", views.call_token),
 
@@ -30,6 +34,11 @@ urlpatterns = [
     path("messages/<int:message_id>", views.message_detail),
     path("messages/<int:message_id>/thread", views.message_thread),
     path("messages/<int:message_id>/reactions", views.reactions),
+    path("messages/<int:message_id>/pin", views.pin_message),
+    path("messages/<int:message_id>/save", views.save_message),
+
+    # Saved items
+    path("saved", views.list_saved),
 
     # Files
     path("files", views.upload_file),

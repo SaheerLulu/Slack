@@ -13,9 +13,11 @@ export default function Sidebar() {
     onlineUserIds,
     openDm,
     createChannel,
+    openGroupDm,
   } = useStore();
 
   const [showCreate, setShowCreate] = useState(false);
+  const [showGroup, setShowGroup] = useState(false);
 
   const publicChannels = channels.filter((c) => !c.isDm);
   const dms = channels.filter((c) => c.isDm);
@@ -33,24 +35,28 @@ export default function Sidebar() {
           <div
             key={c.id}
             className={`chan ${c.id === currentChannelId ? 'active' : ''} ${
-              c.unread ? 'unread' : ''
-            }`}
+              c.unread && !c.muted ? 'unread' : ''
+            } ${c.muted ? 'muted' : ''}`}
             onClick={() => (c.isMember ? selectChannel(c.id) : joinChannel(c.id))}
           >
             <span className="hash">{c.isPrivate ? '🔒' : '#'}</span>
             <span className="name">{c.name}</span>
-            {c.unread > 0 && <span className="badge">{c.unread}</span>}
+            {c.muted && <span className="mute-icon">🔕</span>}
+            {c.unread > 0 && !c.muted && <span className="badge">{c.unread}</span>}
           </div>
         ))}
 
         <div className="section" style={{ marginTop: 12 }}>
           <span>Direct messages</span>
+          <button title="New group message" onClick={() => setShowGroup(true)}>
+            +
+          </button>
         </div>
         {dms.map((c) => (
           <div
             key={c.id}
             className={`chan ${c.id === currentChannelId ? 'active' : ''} ${
-              c.unread ? 'unread' : ''
+              c.unread && !c.muted ? 'unread' : ''
             }`}
             onClick={() => selectChannel(c.id)}
           >
@@ -59,8 +65,8 @@ export default function Sidebar() {
                 c.peer && onlineUserIds.has(c.peer.id) ? 'online' : ''
               }`}
             />
-            <span className="name">{c.name}</span>
-            {c.unread > 0 && <span className="badge">{c.unread}</span>}
+            <span className="name">{c.isGroup ? `👥 ${c.name}` : c.name}</span>
+            {c.unread > 0 && !c.muted && <span className="badge">{c.unread}</span>}
           </div>
         ))}
 
@@ -87,7 +93,65 @@ export default function Sidebar() {
           onCreate={createChannel}
         />
       )}
+      {showGroup && (
+        <GroupDmModal
+          members={members.filter((m) => m.id !== user.id)}
+          onClose={() => setShowGroup(false)}
+          onCreate={openGroupDm}
+        />
+      )}
     </>
+  );
+}
+
+function GroupDmModal({ members, onClose, onCreate }) {
+  const [selected, setSelected] = useState([]);
+  const [error, setError] = useState('');
+
+  const toggle = (id) =>
+    setSelected((s) =>
+      s.includes(id) ? s.filter((x) => x !== id) : [...s, id]
+    );
+
+  const submit = async () => {
+    setError('');
+    try {
+      await onCreate(selected);
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <Modal title="New group message" onClose={onClose}>
+      {error && <div className="error-banner">{error}</div>}
+      <p style={{ color: 'var(--muted)', marginTop: 0 }}>
+        Pick 2 or more people for a group conversation.
+      </p>
+      <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+        {members.map((m) => (
+          <label key={m.id} className="checkbox" style={{ padding: '6px 0' }}>
+            <input
+              type="checkbox"
+              checked={selected.includes(m.id)}
+              onChange={() => toggle(m.id)}
+            />
+            <span>{m.display_name}</span>
+          </label>
+        ))}
+      </div>
+      <div className="actions">
+        <button onClick={onClose}>Cancel</button>
+        <button
+          className="primary"
+          onClick={submit}
+          disabled={selected.length < 2}
+        >
+          Start ({selected.length})
+        </button>
+      </div>
+    </Modal>
   );
 }
 

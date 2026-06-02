@@ -190,6 +190,119 @@ class ChatFlowTests(APITestCase):
         resp = self.client.post(f"/api/channels/{channel_id}/call/token")
         self.assertEqual(resp.status_code, 403)
 
+    def test_group_dm_create_and_message(self):
+        alice = self._register("alice")
+        bob = self._register("bob")
+        carol = self._register("carol")
+        wid = self.workspace.id
+
+        self._auth(alice["access"])
+        resp = self.client.post(
+            f"/api/workspaces/{wid}/group-dm",
+            {"userIds": [bob["user"]["id"], carol["user"]["id"]]},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertTrue(resp.data["isDm"])
+        self.assertTrue(resp.data["isGroup"])
+        self.assertEqual(len(resp.data["peers"]), 2)
+        dm_id = resp.data["id"]
+
+        # Carol (a member) can read it.
+        self._auth(carol["access"])
+        resp = self.client.get(f"/api/channels/{dm_id}/messages")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_group_dm_requires_three_people(self):
+        alice = self._register("alice")
+        bob = self._register("bob")
+        self._auth(alice["access"])
+        resp = self.client.post(
+            f"/api/workspaces/{self.workspace.id}/group-dm",
+            {"userIds": [bob["user"]["id"]]},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_pin_and_list_pins(self):
+        alice = self._register("alice")
+        self._auth(alice["access"])
+        general = Channel.objects.get(name="general")
+        msg = self.client.post(
+            f"/api/channels/{general.id}/messages", {"content": "pin me"},
+            format="json",
+        ).data
+
+        resp = self.client.put(f"/api/messages/{msg['id']}/pin")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.data["pinned"])
+
+        resp = self.client.get(f"/api/channels/{general.id}/pins")
+        self.assertEqual(len(resp.data), 1)
+        self.assertTrue(resp.data[0]["is_pinned"])
+
+        self.client.delete(f"/api/messages/{msg['id']}/pin")
+        resp = self.client.get(f"/api/channels/{general.id}/pins")
+        self.assertEqual(len(resp.data), 0)
+
+    def test_save_and_list_saved(self):
+        alice = self._register("alice")
+        self._auth(alice["access"])
+        general = Channel.objects.get(name="general")
+        msg = self.client.post(
+            f"/api/channels/{general.id}/messages", {"content": "save me"},
+            format="json",
+        ).data
+
+        self.client.put(f"/api/messages/{msg['id']}/save")
+        resp = self.client.get("/api/saved")
+        self.assertEqual(len(resp.data), 1)
+        self.assertTrue(resp.data[0]["saved"])
+
+        self.client.delete(f"/api/messages/{msg['id']}/save")
+        resp = self.client.get("/api/saved")
+        self.assertEqual(len(resp.data), 0)
+
+    def test_leave_and_mute_channel(self):
+        alice = self._register("alice")
+        self._auth(alice["access"])
+        wid = self.workspace.id
+        ch = self.client.post(
+            f"/api/workspaces/{wid}/channels", {"name": "random"}, format="json"
+        ).data
+
+        resp = self.client.post(f"/api/channels/{ch['id']}/mute", {"muted": True}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.data["muted"])
+
+        resp = self.client.post(f"/api/channels/{ch['id']}/leave")
+        self.assertEqual(resp.status_code, 200)
+        # No longer a member -> can't read.
+        resp = self.client.get(f"/api/channels/{ch['id']}/messages")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_cannot_leave_general(self):
+        alice = self._register("alice")
+        self._auth(alice["access"])
+        general = Channel.objects.get(name="general")
+        resp = self.client.post(f"/api/channels/{general.id}/leave")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_here_mention_notifies_all_members(self):
+        alice = self._register("alice")
+        bob = self._register("bob")
+        general = Channel.objects.get(name="general")
+        self._auth(alice["access"])
+        self.client.post(
+            f"/api/channels/{general.id}/messages",
+            {"content": "heads up @here"},
+            format="json",
+        )
+        self._auth(bob["access"])
+        resp = self.client.get("/api/notifications")
+        self.assertEqual(resp.data["unread"], 1)
+        self.assertEqual(resp.data["items"][0]["type"], "mention")
+
     def test_non_member_cannot_read_private_channel(self):
         alice = self._register("alice")
         bob = self._register("bob")

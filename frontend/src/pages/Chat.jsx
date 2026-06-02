@@ -8,6 +8,7 @@ import ThreadPanel from '../components/ThreadPanel';
 import MemberList from '../components/MemberList';
 import SearchPanel from '../components/SearchPanel';
 import NotificationsBell from '../components/NotificationsBell';
+import MessagePanel from '../components/MessagePanel';
 import { Avatar as AvatarCmp } from '../components/ui';
 
 // Lazy-loaded so the LiveKit SDK is only fetched when a call starts.
@@ -35,6 +36,10 @@ export default function Chat() {
     incomingCall,
     dismissIncoming,
     callStateByChannel,
+    loadPins,
+    loadSaved,
+    pins,
+    saved,
   } = useStore();
 
   const [showCreateWs, setShowCreateWs] = useState(false);
@@ -110,6 +115,11 @@ export default function Chat() {
               {channel.topic && <span className="topic">{channel.topic}</span>}
               <span className="spacer" />
               {channel.isMember && <CallButton channel={channel} />}
+              {channel.isMember && (
+                <button className="icon-btn" onClick={() => loadPins(channel.id)}>
+                  📌 Pins
+                </button>
+              )}
               {!channel.isDm && (
                 <button
                   className="icon-btn"
@@ -121,6 +131,10 @@ export default function Chat() {
               <button className="icon-btn" onClick={() => setRightPanel('search')}>
                 🔍 Search
               </button>
+              <button className="icon-btn" onClick={() => loadSaved()} title="Saved items">
+                🔖 Saved
+              </button>
+              {channel.isMember && <ChannelMenu channel={channel} />}
               <NotificationsBell />
             </div>
 
@@ -196,12 +210,57 @@ export default function Chat() {
       {rightPanel === 'thread' && <ThreadPanel />}
       {rightPanel === 'members' && <MemberList />}
       {rightPanel === 'search' && <SearchPanel />}
+      {rightPanel === 'pins' && <MessagePanel title="Pinned messages" items={pins} />}
+      {rightPanel === 'saved' && <MessagePanel title="Saved items" items={saved} />}
 
       {showCreateWs && (
         <CreateWorkspaceModal
           onClose={() => setShowCreateWs(false)}
           onCreate={createWorkspace}
         />
+      )}
+    </div>
+  );
+}
+
+function ChannelMenu({ channel }) {
+  const { toggleMute, leaveChannel } = useStore();
+  const [open, setOpen] = useState(false);
+  const canLeave = !channel.isDm && channel.name !== 'general';
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button className="icon-btn" onClick={() => setOpen((v) => !v)} title="More">
+        ⋯
+      </button>
+      {open && (
+        <div
+          className="mention-pop"
+          style={{ top: '100%', bottom: 'auto', right: 0, left: 'auto', width: 200 }}
+          onMouseLeave={() => setOpen(false)}
+        >
+          <div
+            className="item"
+            onClick={() => {
+              toggleMute(channel.id, !channel.muted);
+              setOpen(false);
+            }}
+          >
+            {channel.muted ? '🔔 Unmute' : '🔕 Mute'} notifications
+          </div>
+          {canLeave && (
+            <div
+              className="item"
+              onClick={() => {
+                leaveChannel(channel.id);
+                setOpen(false);
+              }}
+              style={{ color: 'var(--danger)' }}
+            >
+              🚪 Leave channel
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

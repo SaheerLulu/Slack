@@ -43,16 +43,50 @@ export function formatTime(iso) {
   return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`;
 }
 
-// Render message content with @mentions highlighted.
+// Inline markdown: `code`, **bold**, ~~strike~~, *italic*/_italic_,
+// [text](url), bare URLs, and @mentions (incl. @here/@channel/@everyone).
+const INLINE =
+  /(`[^`]+`)|(\*\*[^*]+\*\*)|(~~[^~]+~~)|(\*[^*\n]+\*)|(_[^_\n]+_)|(\[[^\]]+\]\(https?:\/\/[^\s)]+\))|(https?:\/\/[^\s]+)|(@(?:here|channel|everyone|[a-zA-Z0-9_.\-]{3,30}))/g;
+
+function parseInline(text) {
+  const nodes = [];
+  let last = 0;
+  let m;
+  let i = 0;
+  INLINE.lastIndex = 0;
+  while ((m = INLINE.exec(text))) {
+    if (m.index > last) nodes.push(text.slice(last, m.index));
+    const tok = m[0];
+    if (m[1]) nodes.push(<code className="md-code" key={i}>{tok.slice(1, -1)}</code>);
+    else if (m[2]) nodes.push(<strong key={i}>{tok.slice(2, -2)}</strong>);
+    else if (m[3]) nodes.push(<del key={i}>{tok.slice(2, -2)}</del>);
+    else if (m[4] || m[5]) nodes.push(<em key={i}>{tok.slice(1, -1)}</em>);
+    else if (m[6]) {
+      const lm = tok.match(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/);
+      nodes.push(
+        <a key={i} href={lm[2]} target="_blank" rel="noreferrer">{lm[1]}</a>
+      );
+    } else if (m[7]) {
+      nodes.push(<a key={i} href={tok} target="_blank" rel="noreferrer">{tok}</a>);
+    } else if (m[8]) {
+      nodes.push(<span className="mention" key={i}>{tok}</span>);
+    }
+    last = m.index + tok.length;
+    i++;
+  }
+  if (last < text.length) nodes.push(text.slice(last));
+  return nodes;
+}
+
+// Render message content: fenced ```code blocks``` + inline markdown.
 export function renderContent(text) {
-  const parts = text.split(/(@[a-zA-Z0-9_.\-]{3,30})/g);
-  return parts.map((part, i) =>
-    part.startsWith('@') ? (
-      <span className="mention" key={i}>
-        {part}
-      </span>
+  if (!text) return null;
+  const parts = text.split(/```\n?([\s\S]*?)```/g);
+  return parts.map((part, idx) =>
+    idx % 2 === 1 ? (
+      <pre className="md-pre" key={`p${idx}`}><code>{part}</code></pre>
     ) : (
-      <span key={i}>{part}</span>
+      <span key={`t${idx}`}>{parseInline(part)}</span>
     )
   );
 }

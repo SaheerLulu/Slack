@@ -1,12 +1,18 @@
 import { useState } from 'react';
 import { useStore } from '../store';
 import { Avatar, formatTime, renderContent } from './ui';
-
-const QUICK_EMOJIS = ['👍', '❤️', '😄', '🎉', '🙌', '👀', '✅'];
+import EmojiPicker from './EmojiPicker';
 
 export default function Message({ message, showThreadLink = true }) {
-  const { user, editMessage, deleteMessage, toggleReaction, openThread } =
-    useStore();
+  const {
+    user,
+    editMessage,
+    deleteMessage,
+    toggleReaction,
+    openThread,
+    pinMessage,
+    toggleSave,
+  } = useStore();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.content);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -24,6 +30,9 @@ export default function Message({ message, showThreadLink = true }) {
     <div className="msg">
       <Avatar user={message.user} />
       <div className="body">
+        {message.is_pinned && !message.is_deleted && (
+          <div className="pinned-tag">📌 Pinned</div>
+        )}
         <div className="meta">
           <span className="author">{message.user.display_name}</span>
           <span className="time">{formatTime(message.created_at)}</span>
@@ -96,20 +105,13 @@ export default function Message({ message, showThreadLink = true }) {
                 😊+
               </button>
               {pickerOpen && (
-                <div className="mention-pop" style={{ width: 'auto', padding: 8, display: 'flex', gap: 4 }}>
-                  {QUICK_EMOJIS.map((e) => (
-                    <button
-                      key={e}
-                      className="reaction"
-                      onClick={() => {
-                        toggleReaction(message, e);
-                        setPickerOpen(false);
-                      }}
-                    >
-                      {e}
-                    </button>
-                  ))}
-                </div>
+                <EmojiPicker
+                  onSelect={(e) => {
+                    toggleReaction(message, e);
+                    setPickerOpen(false);
+                  }}
+                  onClose={() => setPickerOpen(false)}
+                />
               )}
             </div>
           </div>
@@ -130,6 +132,18 @@ export default function Message({ message, showThreadLink = true }) {
               💬
             </button>
           )}
+          <button
+            title={message.saved ? 'Remove from saved' : 'Save for later'}
+            onClick={() => toggleSave(message)}
+          >
+            {message.saved ? '🔖' : '🏷️'}
+          </button>
+          <button
+            title={message.is_pinned ? 'Unpin' : 'Pin to channel'}
+            onClick={() => pinMessage(message, !message.is_pinned)}
+          >
+            📌
+          </button>
           {mine && (
             <>
               <button title="Edit" onClick={() => { setDraft(message.content); setEditing(true); }}>

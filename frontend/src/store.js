@@ -85,6 +85,8 @@ export const useStore = create((set, get) => ({
       callStateByChannel: {},
       activeCall: null,
       incomingCall: null,
+      pins: [],
+      saved: [],
     });
   },
 
@@ -234,6 +236,70 @@ export const useStore = create((set, get) => ({
     });
   },
 
+  // ===================== group DMs =====================
+  async openGroupDm(userIds) {
+    const channel = await api.post(
+      `/workspaces/${get().currentWorkspaceId}/group-dm`,
+      { userIds }
+    );
+    await get().loadChannels();
+    window.__ws?.subscribe(channel.id);
+    get().selectChannel(channel.id);
+  },
+
+  // ===================== channel management =====================
+  async leaveChannel(channelId) {
+    await api.post(`/channels/${channelId}/leave`);
+    if (get().currentChannelId === channelId) set({ currentChannelId: null });
+    await get().loadChannels();
+    const first = get().channels.find((c) => c.isMember);
+    if (first) get().selectChannel(first.id);
+  },
+
+  async toggleMute(channelId, muted) {
+    await api.post(`/channels/${channelId}/mute`, { muted });
+    set({
+      channels: get().channels.map((c) =>
+        c.id === channelId ? { ...c, muted } : c
+      ),
+    });
+  },
+
+  // ===================== pins & saved =====================
+  pins: [],
+  saved: [],
+
+  async pinMessage(message, pin) {
+    if (pin) await api.put(`/messages/${message.id}/pin`);
+    else await api.del(`/messages/${message.id}/pin`);
+  },
+
+  async loadPins(channelId) {
+    const pins = await api.get(`/channels/${channelId}/pins`);
+    set({ pins, rightPanel: 'pins' });
+  },
+
+  async toggleSave(message) {
+    if (message.saved) await api.del(`/messages/${message.id}/save`);
+    else await api.put(`/messages/${message.id}/save`);
+    // Reflect locally across caches.
+    get()._patchMessage(message.id, (m) => ({ ...m, saved: !m.saved }));
+  },
+
+  async loadSaved() {
+    const saved = await api.get('/saved');
+    set({ saved, rightPanel: 'saved' });
+  },
+
+  _patchMessage(messageId, fn) {
+    const { messagesByChannel } = get();
+    const updated = {};
+    for (const [cid, list] of Object.entries(messagesByChannel)) {
+      updated[cid] = list.map((m) => (m.id === messageId ? fn(m) : m));
+    }
+    set({ messagesByChannel: updated });
+  },
+
   // ===================== calls =====================
   async startCall(channelId) {
     const data = await api.post(`/channels/${channelId}/call/token`, {
@@ -323,6 +389,13 @@ export const useStore = create((set, get) => ({
       }
       case 'reaction': {
         state._applyReactions(event.messageId, event.reactions);
+        break;
+      }
+      case 'pin': {
+        state._patchMessage(event.messageId, (m) => ({
+          ...m,
+          is_pinned: event.pinned,
+        }));
         break;
       }
       case 'typing': {

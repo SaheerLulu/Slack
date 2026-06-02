@@ -1,6 +1,7 @@
 import re
 
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Count, Q
 from django.http import FileResponse, Http404
 from django.utils import timezone
@@ -20,6 +21,7 @@ from .models import (
     Message,
     Notification,
     Reaction,
+    SavedItem,
     User,
     Workspace,
     WorkspaceMember,
@@ -52,18 +54,29 @@ def shape_channel(channel, user):
         "isDm": channel.is_dm,
         "isPrivate": channel.is_private,
         "isMember": membership is not None,
+        "muted": membership.muted if membership else False,
         "topic": channel.topic,
     }
     if channel.is_dm:
-        peer = (
-            channel.members.exclude(id=user.id).first()
-            or channel.members.first()
-        )
-        data["name"] = peer.display_name if peer else "Direct message"
-        data["peer"] = UserSerializer(peer).data if peer else None
+        others = list(channel.members.exclude(id=user.id))
+        if len(others) == 1:
+            data["name"] = others[0].display_name
+            data["peer"] = UserSerializer(others[0]).data
+            data["isGroup"] = False
+        elif len(others) > 1:
+            # Group DM — name from the other participants' display names.
+            data["name"] = ", ".join(u.display_name for u in others)
+            data["peer"] = None
+            data["isGroup"] = True
+        else:
+            data["name"] = "Direct message"
+            data["peer"] = None
+            data["isGroup"] = False
+        data["peers"] = UserSerializer(others, many=True).data
     else:
         data["name"] = channel.name
         data["peer"] = None
+        data["isGroup"] = False
 
     # Unread count: messages newer than the user's last-read marker.
     if membership:
@@ -253,6 +266,29 @@ def mark_read(request, channel_id):
     return Response({"ok": True, "lastReadMessage": last.id if last else None})
 
 
+@api_view(["POST"])
+def leave_channel(request, channel_id):
+    channel = perms.get_channel_or_404(channel_id)
+    if channel.is_dm:
+        return Response({"detail": "You can't leave a DM."}, status=400)
+    if channel.name == "general" and not channel.is_private:
+        return Response({"detail": "You can't leave #general."}, status=400)
+    ChannelMember.objects.filter(channel=channel, user=request.user).delete()
+    return Response({"ok": True})
+
+
+@api_view(["POST"])
+def mute_channel(request, channel_id):
+    membership = ChannelMember.objects.filter(
+        channel_id=channel_id, user=request.user
+    ).first()
+    if not membership:
+        return Response(status=status.HTTP_403_FORBIDDEN)
+    membership.muted = bool(request.data.get("muted", True))
+    membership.save(update_fields=["muted"])
+    return Response({"ok": True, "muted": membership.muted})
+
+
 # --------------------------------------------------------------------------
 # Direct messages
 # --------------------------------------------------------------------------
@@ -285,6 +321,44 @@ def open_dm(request, workspace_id, user_id):
     return Response(shape_channel(channel, request.user))
 
 
+@api_view(["POST"])
+def open_group_dm(request, workspace_id):
+    """Open (or fetch) a group DM with 2+ other workspace members."""
+    perms.require_workspace_member(request.user, workspace_id)
+    raw_ids = request.data.get("userIds") or []
+    try:
+        other_ids = {int(i) for i in raw_ids} - {request.user.id}
+    except (TypeError, ValueError):
+        return Response({"detail": "Invalid userIds."}, status=400)
+    if len(other_ids) < 2:
+        return Response(
+            {"detail": "A group DM needs at least 3 people."}, status=400
+        )
+    members = list(
+        User.objects.filter(
+            pk__in=other_ids, workspace_memberships__workspace_id=workspace_id
+        )
+    )
+    if len(members) != len(other_ids):
+        return Response(
+            {"detail": "All members must be in this workspace."}, status=400
+        )
+
+    all_ids = sorted({request.user.id, *other_ids})
+    dm_key = f"{workspace_id}:" + ":".join(str(i) for i in all_ids)
+    channel = Channel.objects.filter(dm_key=dm_key).first()
+    if not channel:
+        now = timezone.now()
+        with transaction.atomic():
+            channel = Channel.objects.create(
+                workspace_id=workspace_id, is_dm=True, dm_key=dm_key,
+                created_by=request.user,
+            )
+            for uid in all_ids:
+                ChannelMember.objects.create(channel=channel, user_id=uid)
+    return Response(shape_channel(channel, request.user))
+
+
 # --------------------------------------------------------------------------
 # Messages
 # --------------------------------------------------------------------------
@@ -292,6 +366,19 @@ def _annotate_messages(qs):
     return qs.select_related("user").prefetch_related(
         "attachments", "reactions"
     ).annotate(reply_count_annotated=Count("replies", distinct=True))
+
+
+def serialize_messages(messages, user, many=True):
+    """Serialize message(s) with the viewer's saved-item state attached."""
+    ids = [m.id for m in messages] if many else [messages.id]
+    saved_ids = set(
+        SavedItem.objects.filter(user=user, message_id__in=ids).values_list(
+            "message_id", flat=True
+        )
+    )
+    return MessageSerializer(
+        messages, many=many, context={"saved_ids": saved_ids}
+    ).data
 
 
 @api_view(["GET", "POST"])
@@ -308,7 +395,7 @@ def channel_messages(request, channel_id):
         limit = min(int(request.query_params.get("limit", 50)), 100)
         messages = list(qs.order_by("-id")[:limit])
         messages.reverse()
-        return Response(MessageSerializer(messages, many=True).data)
+        return Response(serialize_messages(messages, request.user))
 
     # POST — create a message
     content = (request.data.get("content") or "").strip()
@@ -397,9 +484,10 @@ def message_thread(request, message_id):
         Message.objects.filter(parent=parent)
     ).order_by("id")
     root = _annotate_messages(Message.objects.filter(pk=parent.pk)).first()
+    replies = list(replies)
     return Response({
-        "root": MessageSerializer(root).data,
-        "replies": MessageSerializer(replies, many=True).data,
+        "root": serialize_messages(root, request.user, many=False),
+        "replies": serialize_messages(replies, request.user),
     })
 
 
@@ -411,8 +499,19 @@ def _handle_notifications(message, channel, parent):
     if parent and parent.user_id != message.user_id:
         _notify(parent.user_id, Notification.REPLY, message, channel, notified)
 
-    # @mentions -> notify mentioned channel members.
-    usernames = set(MENTION_RE.findall(message.content or ""))
+    tokens = set(MENTION_RE.findall(message.content or ""))
+
+    # Broadcast mentions (@channel / @here / @everyone) notify all members.
+    if tokens & {"channel", "here", "everyone"}:
+        member_ids = ChannelMember.objects.filter(channel=channel).values_list(
+            "user_id", flat=True
+        )
+        for uid in member_ids:
+            if uid != message.user_id:
+                _notify(uid, Notification.MENTION, message, channel, notified)
+
+    # @username -> notify that specific member.
+    usernames = tokens - {"channel", "here", "everyone"}
     if usernames:
         member_ids = dict(
             ChannelMember.objects.filter(
@@ -477,6 +576,68 @@ def reactions(request, message_id):
         {"messageId": message.id, "reactions": data["reactions"]},
     )
     return Response(data["reactions"])
+
+
+# --------------------------------------------------------------------------
+# Pins
+# --------------------------------------------------------------------------
+@api_view(["PUT", "DELETE"])
+def pin_message(request, message_id):
+    message = Message.objects.filter(pk=message_id).select_related("channel").first()
+    if not message:
+        raise Http404
+    perms.require_channel_member(request.user, message.channel_id)
+    if request.method == "PUT":
+        message.pinned_at = timezone.now()
+        message.pinned_by = request.user
+    else:
+        message.pinned_at = None
+        message.pinned_by = None
+    message.save(update_fields=["pinned_at", "pinned_by"])
+    events.to_channel(
+        message.channel_id, "pin",
+        {"messageId": message.id, "channelId": message.channel_id,
+         "pinned": message.pinned_at is not None},
+    )
+    return Response({"ok": True, "pinned": message.pinned_at is not None})
+
+
+@api_view(["GET"])
+def channel_pins(request, channel_id):
+    perms.require_channel_member(request.user, channel_id)
+    pinned = list(_annotate_messages(
+        Message.objects.filter(
+            channel_id=channel_id, pinned_at__isnull=False, is_deleted=False
+        )
+    ).order_by("-pinned_at"))
+    return Response(serialize_messages(pinned, request.user))
+
+
+# --------------------------------------------------------------------------
+# Saved items (bookmarks)
+# --------------------------------------------------------------------------
+@api_view(["PUT", "DELETE"])
+def save_message(request, message_id):
+    message = Message.objects.filter(pk=message_id).select_related("channel").first()
+    if not message:
+        raise Http404
+    perms.require_channel_member(request.user, message.channel_id)
+    if request.method == "PUT":
+        SavedItem.objects.get_or_create(user=request.user, message=message)
+    else:
+        SavedItem.objects.filter(user=request.user, message=message).delete()
+    return Response({"ok": True})
+
+
+@api_view(["GET"])
+def list_saved(request):
+    saved = SavedItem.objects.filter(user=request.user).values_list(
+        "message_id", flat=True
+    )
+    messages = list(_annotate_messages(
+        Message.objects.filter(pk__in=saved, is_deleted=False)
+    ).order_by("-id"))
+    return Response(serialize_messages(messages, request.user))
 
 
 # --------------------------------------------------------------------------
@@ -554,14 +715,14 @@ def search(request, workspace_id):
     member_channel_ids = ChannelMember.objects.filter(
         user=request.user, channel__workspace_id=workspace_id
     ).values_list("channel_id", flat=True)
-    messages = _annotate_messages(
+    messages = list(_annotate_messages(
         Message.objects.filter(
             channel_id__in=member_channel_ids,
             is_deleted=False,
             content__icontains=q,
         )
-    ).order_by("-id")[:50]
-    return Response(MessageSerializer(messages, many=True).data)
+    ).order_by("-id")[:50])
+    return Response(serialize_messages(messages, request.user))
 
 
 # --------------------------------------------------------------------------

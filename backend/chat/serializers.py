@@ -74,6 +74,8 @@ class MessageSerializer(serializers.ModelSerializer):
     reactions = serializers.SerializerMethodField()
     reply_count = serializers.SerializerMethodField()
     content = serializers.SerializerMethodField()
+    is_pinned = serializers.SerializerMethodField()
+    saved = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
@@ -81,10 +83,18 @@ class MessageSerializer(serializers.ModelSerializer):
             "id", "channel", "user", "content", "parent",
             "created_at", "edited_at", "is_deleted",
             "attachments", "reactions", "reply_count",
+            "is_pinned", "saved",
         ]
 
     def get_content(self, obj):
         return "" if obj.is_deleted else obj.content
+
+    def get_is_pinned(self, obj):
+        return obj.pinned_at is not None
+
+    def get_saved(self, obj):
+        # The view passes the set of message ids this user has saved.
+        return obj.id in self.context.get("saved_ids", set())
 
     def get_reply_count(self, obj):
         # Annotated in the queryset where available; fall back to a count.
